@@ -10,7 +10,7 @@ import os
 class MultiBandApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Agri-Tech: Multi-File Band Calculator")
+        self.root.title("Index Calculator")
         self.root.geometry("1000x750")
 
         # Variabel Path File (Setiap band punya variabel sendiri)
