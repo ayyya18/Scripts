@@ -133,8 +133,15 @@ class AgriApp:
 
     def setup_prediction_tables(self):
         # Tabel untuk Model Gabungan (RF)
-        ttk.Label(self.frame_rf, text="Hasil Prediksi Model Gabungan (Random Forest):",
-                  font=("Arial", 10, "bold")).pack(anchor="w", pady=5)
+        header_frame_rf = ttk.Frame(self.frame_rf)
+        header_frame_rf.pack(fill="x", padx=5, pady=5)
+
+        ttk.Label(header_frame_rf, text="Hasil Prediksi Model Gabungan (Random Forest):",
+                  font=("Arial", 10, "bold")).pack(anchor="w")
+
+        self.lbl_mae_rf = ttk.Label(header_frame_rf, text="Rata-rata Selisih: -",
+                                    font=("Arial", 9, "bold"), foreground="blue")
+        self.lbl_mae_rf.pack(anchor="w", pady=2)
 
         tree_frame_rf = ttk.Frame(self.frame_rf)
         tree_frame_rf.pack(fill="both", expand=True, pady=5)
@@ -161,8 +168,15 @@ class AgriApp:
         self.tree_rf.pack(fill="both", expand=True)
 
         # Tabel untuk Model NDVI
-        ttk.Label(self.frame_ndvi, text="Hasil Prediksi Model NDVI:",
-                  font=("Arial", 10, "bold")).pack(anchor="w", pady=5)
+        header_frame_ndvi = ttk.Frame(self.frame_ndvi)
+        header_frame_ndvi.pack(fill="x", padx=5, pady=5)
+
+        ttk.Label(header_frame_ndvi, text="Hasil Prediksi Model NDVI:",
+                  font=("Arial", 10, "bold")).pack(anchor="w")
+
+        self.lbl_mae_ndvi = ttk.Label(header_frame_ndvi, text="Rata-rata Selisih: -",
+                                      font=("Arial", 9, "bold"), foreground="blue")
+        self.lbl_mae_ndvi.pack(anchor="w", pady=2)
 
         tree_frame_ndvi = ttk.Frame(self.frame_ndvi)
         tree_frame_ndvi.pack(fill="both", expand=True, pady=5)
@@ -189,8 +203,15 @@ class AgriApp:
         self.tree_ndvi.pack(fill="both", expand=True)
 
         # Tabel untuk Model NDRE
-        ttk.Label(self.frame_ndre, text="Hasil Prediksi Model NDRE:",
-                  font=("Arial", 10, "bold")).pack(anchor="w", pady=5)
+        header_frame_ndre = ttk.Frame(self.frame_ndre)
+        header_frame_ndre.pack(fill="x", padx=5, pady=5)
+
+        ttk.Label(header_frame_ndre, text="Hasil Prediksi Model NDRE:",
+                  font=("Arial", 10, "bold")).pack(anchor="w")
+
+        self.lbl_mae_ndre = ttk.Label(header_frame_ndre, text="Rata-rata Selisih: -",
+                                      font=("Arial", 9, "bold"), foreground="blue")
+        self.lbl_mae_ndre.pack(anchor="w", pady=2)
 
         tree_frame_ndre = ttk.Frame(self.frame_ndre)
         tree_frame_ndre.pack(fill="both", expand=True, pady=5)
@@ -217,8 +238,15 @@ class AgriApp:
         self.tree_ndre.pack(fill="both", expand=True)
 
         # Tabel untuk Model GNDVI
-        ttk.Label(self.frame_gndvi, text="Hasil Prediksi Model GNDVI:",
-                  font=("Arial", 10, "bold")).pack(anchor="w", pady=5)
+        header_frame_gndvi = ttk.Frame(self.frame_gndvi)
+        header_frame_gndvi.pack(fill="x", padx=5, pady=5)
+
+        ttk.Label(header_frame_gndvi, text="Hasil Prediksi Model GNDVI:",
+                  font=("Arial", 10, "bold")).pack(anchor="w")
+
+        self.lbl_mae_gndvi = ttk.Label(header_frame_gndvi, text="Rata-rata Selisih: -",
+                                       font=("Arial", 9, "bold"), foreground="blue")
+        self.lbl_mae_gndvi.pack(anchor="w", pady=2)
 
         tree_frame_gndvi = ttk.Frame(self.frame_gndvi)
         tree_frame_gndvi.pack(fill="both", expand=True, pady=5)
@@ -435,7 +463,8 @@ class AgriApp:
             }
 
             # 5. Tampilkan hasil prediksi semua model di tabel masing-masing
-            self.display_prediction_results(df_input, y_true, y_pred_rf, y_pred_ndvi, y_pred_ndre, y_pred_gndvi)
+            self.display_prediction_results(df_input, y_true, y_pred_rf, y_pred_ndvi, y_pred_ndre, y_pred_gndvi,
+                                            model_results)
 
             # 6. Simpan hasil perbandingan untuk ditampilkan di tab 3
             self.model_comparison_results = model_results
@@ -451,16 +480,24 @@ class AgriApp:
         except Exception as e:
             messagebox.showerror("Error Validasi", f"Terjadi kesalahan: {str(e)}")
 
-    def display_prediction_results(self, df_input, y_true, y_pred_rf, y_pred_ndvi, y_pred_ndre, y_pred_gndvi):
+    def display_prediction_results(self, df_input, y_true, y_pred_rf, y_pred_ndvi, y_pred_ndre, y_pred_gndvi,
+                                   model_results):
         """Menampilkan hasil prediksi semua model di tabel masing-masing"""
 
         # Bersihkan semua tabel terlebih dahulu
         for tree in [self.tree_rf, self.tree_ndvi, self.tree_ndre, self.tree_gndvi]:
             tree.delete(*tree.get_children())
 
+        # Hitung selisih untuk setiap model
+        selisih_rf_list = []
+        selisih_ndvi_list = []
+        selisih_ndre_list = []
+        selisih_gndvi_list = []
+
         # Tampilkan hasil untuk Model Gabungan (RF)
         for i in range(len(df_input)):
             selisih_rf = abs(y_true.iloc[i] - y_pred_rf[i])
+            selisih_rf_list.append(selisih_rf)
             self.tree_rf.insert("", "end", values=(
                 i + 1,
                 f"{df_input['NDVI'].iloc[i]:.4f}",
@@ -474,6 +511,7 @@ class AgriApp:
         # Tampilkan hasil untuk Model NDVI
         for i in range(len(df_input)):
             selisih_ndvi = abs(y_true.iloc[i] - y_pred_ndvi[i])
+            selisih_ndvi_list.append(selisih_ndvi)
             self.tree_ndvi.insert("", "end", values=(
                 i + 1,
                 f"{df_input['NDVI'].iloc[i]:.4f}",
@@ -485,6 +523,7 @@ class AgriApp:
         # Tampilkan hasil untuk Model NDRE
         for i in range(len(df_input)):
             selisih_ndre = abs(y_true.iloc[i] - y_pred_ndre[i])
+            selisih_ndre_list.append(selisih_ndre)
             self.tree_ndre.insert("", "end", values=(
                 i + 1,
                 f"{df_input['NDRE'].iloc[i]:.4f}",
@@ -496,6 +535,7 @@ class AgriApp:
         # Tampilkan hasil untuk Model GNDVI
         for i in range(len(df_input)):
             selisih_gndvi = abs(y_true.iloc[i] - y_pred_gndvi[i])
+            selisih_gndvi_list.append(selisih_gndvi)
             self.tree_gndvi.insert("", "end", values=(
                 i + 1,
                 f"{df_input['GNDVI'].iloc[i]:.4f}",
@@ -503,6 +543,12 @@ class AgriApp:
                 f"{y_true.iloc[i]:.2f}",
                 f"{selisih_gndvi:.2f}"
             ))
+
+        # Update label rata-rata selisih untuk setiap model
+        self.lbl_mae_rf.config(text=f"Rata-rata Selisih: {model_results['Gabungan (RF)']['MAE']:.2f}")
+        self.lbl_mae_ndvi.config(text=f"Rata-rata Selisih: {model_results['NDVI']['MAE']:.2f}")
+        self.lbl_mae_ndre.config(text=f"Rata-rata Selisih: {model_results['NDRE']['MAE']:.2f}")
+        self.lbl_mae_gndvi.config(text=f"Rata-rata Selisih: {model_results['GNDVI']['MAE']:.2f}")
 
     def show_model_comparison(self):
         """Menampilkan perbandingan akurasi semua model di tab 3"""
