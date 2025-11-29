@@ -3,8 +3,12 @@ from tkinter import ttk, filedialog, messagebox, scrolledtext, Toplevel, colorch
 import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import r2_score, mean_squared_error
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
+from sklearn.linear_model import LinearRegression
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.svm import SVR
+from sklearn.preprocessing import StandardScaler
 import joblib
 import rasterio
 from rasterio.plot import show
@@ -15,6 +19,8 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 from matplotlib.colors import LinearSegmentedColormap
 import warnings
+from datetime import datetime
+import seaborn as sns
 
 warnings.filterwarnings('ignore')
 
@@ -27,24 +33,28 @@ except:
     pass
 
 
-class ModernAplikasiMachineLearning:
+class ComprehensiveAgriAnalytics:
     def __init__(self, root):
         self.root = root
-        self.root.title("🌱 AgriSmart - Sistem Analisis Hara Kalium")
-        self.root.geometry("1200x800")
+        self.root.title("🌱 Comprehensive Agri Analytics - Nutrient Prediction System")
+        self.root.geometry("1400x900")
         self.root.configure(bg='#f5f5f7')
 
-        # Center window on screen
         self.center_window()
 
-        # Variabel
+        # Variabel utama
         self.path_data_latih = tk.StringVar()
+        self.path_data_prediksi = tk.StringVar()
         self.path_foto_udara = tk.StringVar()
-        self.model_path = "model_rf_hara.joblib"
+        self.model_path = "best_nutrient_model.joblib"
         self.df_data = None
-        self.model = None
+        self.df_prediksi = None
+        self.best_model = None
+        self.best_index = None
+        self.comparison_results = None
+        self.prediction_results = None
 
-        # Band configuration
+        # Konfigurasi band
         self.band_files = {
             'Blue': tk.StringVar(),
             'Green': tk.StringVar(),
@@ -53,18 +63,30 @@ class ModernAplikasiMachineLearning:
             'RedEdge': tk.StringVar()
         }
 
-        # Color settings for plots
-        self.plot_colors = {
-            'scatter': '#007AFF',
-            'feature_importance': '#34C759',
-            'actual_line': '#FF3B30',
-            'grid': '#E5E5EA'
+        # Model machine learning
+        self.models = {
+            'Random Forest': RandomForestRegressor(n_estimators=100, random_state=42),
+            'Linear Regression': LinearRegression(),
+            'Decision Tree': DecisionTreeRegressor(random_state=42),
+            'SVM': SVR(kernel='rbf')
         }
 
-        # Setup modern style
-        self.setup_modern_style()
+        # Indeks vegetasi
+        self.vegetation_indices = {
+            'NDVI': lambda b, g, r, nir, re: (nir - r) / (nir + r + 1e-8),
+            'GNDVI': lambda b, g, r, nir, re: (nir - g) / (nir + g + 1e-8),
+            'NDRE': lambda b, g, r, nir, re: (nir - re) / (nir + re + 1e-8),
+            'SAVI': lambda b, g, r, nir, re: (1.5 * (nir - r)) / (nir + r + 0.5 + 1e-8),
+            'EVI': lambda b, g, r, nir, re: (2.5 * (nir - r)) / (nir + 6 * r - 7.5 * b + 1 + 1e-8),
+            'OSAVI': lambda b, g, r, nir, re: (1.16 * (nir - r)) / (nir + r + 0.16 + 1e-8),
+            'MSAVI': lambda b, g, r, nir, re: (2 * nir + 1 - np.sqrt((2 * nir + 1) ** 2 - 8 * (nir - r))) / 2,
+            'GCI': lambda b, g, r, nir, re: (nir / g) - 1,
+            'RECI': lambda b, g, r, nir, re: (nir / re) - 1,
+            'NDWI': lambda b, g, r, nir, re: (g - nir) / (g + nir + 1e-8)
+        }
 
-        # Create UI
+        # Setup UI
+        self.setup_modern_style()
         self.create_ui()
 
     def center_window(self):
@@ -80,52 +102,17 @@ class ModernAplikasiMachineLearning:
         """Setup macOS-like modern style"""
         style = ttk.Style()
 
-        # Try to use aqua theme on macOS, clam on others
         if self.root.tk.call('tk', 'windowingsystem') == 'aqua':
             style.theme_use('aqua')
         else:
             style.theme_use('clam')
 
-        # Configure modern colors
         style.configure('Modern.TFrame', background='#f5f5f7')
         style.configure('Modern.TLabelframe', background='#ffffff', relief='flat', borderwidth=1)
         style.configure('Modern.TLabelframe.Label', background='#ffffff', font=('SF Pro Text', 11, 'bold'))
 
-        # Modern button styles
-        style.configure('Accent.TButton',
-                        background='#007AFF',
-                        foreground='white',
-                        borderwidth=0,
-                        focuscolor='none',
-                        font=('SF Pro Text', 11))
-        style.map('Accent.TButton',
-                  background=[('active', '#0056D6'), ('pressed', '#0040B2')])
-
-        style.configure('Secondary.TButton',
-                        background='#8E8E93',
-                        foreground='white',
-                        borderwidth=0,
-                        font=('SF Pro Text', 11))
-
-        # Entry style
-        style.configure('Modern.TEntry',
-                        borderwidth=1,
-                        relief='flat',
-                        padding=8,
-                        fieldbackground='#ffffff')
-
-        # Tab style
-        style.configure('Modern.TNotebook', background='#f5f5f7', borderwidth=0)
-        style.configure('Modern.TNotebook.Tab',
-                        background='#e5e5ea',
-                        padding=[20, 8],
-                        font=('SF Pro Text', 10))
-        style.map('Modern.TNotebook.Tab',
-                  background=[('selected', '#ffffff')],
-                  expand=[('selected', [1, 1, 1, 0])])
-
     def create_modern_label(self, parent, text, font_size=12, bold=False, color='#000000'):
-        """Create a modern label with consistent styling"""
+        """Create a modern label"""
         font_family = 'SF Pro Text' if self.root.tk.call('tk', 'windowingsystem') == 'aqua' else 'Arial'
         font_weight = 'bold' if bold else 'normal'
         return ttk.Label(parent, text=text,
@@ -139,32 +126,33 @@ class ModernAplikasiMachineLearning:
         header_frame = ttk.Frame(self.root, style='Modern.TFrame')
         header_frame.pack(fill='x', padx=20, pady=(20, 10))
 
-        title_label = self.create_modern_label(header_frame, "🌱 AgriSmart", font_size=24, bold=True, color='#007AFF')
+        title_label = self.create_modern_label(header_frame, "🌱 Comprehensive Nutrient Prediction System",
+                                               font_size=20, bold=True, color='#007AFF')
         title_label.pack(side='left')
-
-        subtitle_label = self.create_modern_label(header_frame, "Sistem Analisis Hara Kalium & Pemetaan Cerdas",
-                                                  font_size=14, color='#8E8E93')
-        subtitle_label.pack(side='left', padx=(10, 0))
 
         # Main tab control
         tab_control = ttk.Notebook(self.root, style='Modern.TNotebook')
 
-        # Create tabs
         self.tab_training = ttk.Frame(tab_control, style='Modern.TFrame')
-        self.tab_prediksi = ttk.Frame(tab_control, style='Modern.TFrame')
+        self.tab_prediction = ttk.Frame(tab_control, style='Modern.TFrame')
+        self.tab_comparison = ttk.Frame(tab_control, style='Modern.TFrame')
+        self.tab_mapping = ttk.Frame(tab_control, style='Modern.TFrame')
 
-        tab_control.add(self.tab_training, text='   📊 Training Model  ')
-        tab_control.add(self.tab_prediksi, text='   🗺️  Prediksi Peta  ')
+        tab_control.add(self.tab_training, text='   1. 📊 Model Training   ')
+        tab_control.add(self.tab_prediction, text='   2. 🔮 Data Prediction   ')
+        tab_control.add(self.tab_comparison, text='   3. 📈 Index Comparison   ')
+        tab_control.add(self.tab_mapping, text='   4. 🗺️  Spatial Mapping   ')
         tab_control.pack(expand=1, fill="both", padx=20, pady=10)
 
-        # Build tab contents
         self.build_training_tab()
         self.build_prediction_tab()
+        self.build_comparison_tab()
+        self.build_mapping_tab()
 
     def build_training_tab(self):
-        """Build the training tab with modern UI"""
+        """Build the training tab"""
         # File input section
-        file_frame = ttk.LabelFrame(self.tab_training, text=" Input Data Training ", style='Modern.TLabelframe')
+        file_frame = ttk.LabelFrame(self.tab_training, text=" Training Data Input ", style='Modern.TLabelframe')
         file_frame.pack(fill='x', padx=20, pady=10)
 
         file_input_frame = ttk.Frame(file_frame, style='Modern.TFrame')
@@ -178,9 +166,29 @@ class ModernAplikasiMachineLearning:
                                 command=self.browse_data_latih, style='Secondary.TButton')
         btn_browse.pack(side='left', padx=(0, 10))
 
-        btn_train = ttk.Button(file_input_frame, text="🚀 Train Model",
+        btn_train = ttk.Button(file_input_frame, text="🚀 Train & Compare Models",
                                command=self.start_training_thread, style='Accent.TButton')
         btn_train.pack(side='left')
+
+        # Model selection
+        model_frame = ttk.LabelFrame(self.tab_training, text=" Model Selection ", style='Modern.TLabelframe')
+        model_frame.pack(fill='x', padx=20, pady=10)
+
+        model_grid = ttk.Frame(model_frame, style='Modern.TFrame')
+        model_grid.pack(fill='x', padx=15, pady=10)
+
+        self.model_vars = {}
+        row, col = 0, 0
+        for model_name in self.models.keys():
+            var = tk.BooleanVar(value=True)
+            self.model_vars[model_name] = var
+            cb = ttk.Checkbutton(model_grid, text=model_name, variable=var,
+                                 style='Modern.TCheckbutton')
+            cb.grid(row=row, column=col, sticky='w', padx=10, pady=5)
+            col += 1
+            if col > 2:
+                col = 0
+                row += 1
 
         # Preview section
         preview_frame = ttk.LabelFrame(self.tab_training, text=" Data Preview ", style='Modern.TLabelframe')
@@ -188,7 +196,6 @@ class ModernAplikasiMachineLearning:
 
         self.tree_input = ttk.Treeview(preview_frame, show='headings', style='Modern.Treeview')
 
-        # Scrollbars for treeview
         scroll_y = ttk.Scrollbar(preview_frame, orient="vertical", command=self.tree_input.yview)
         scroll_x = ttk.Scrollbar(preview_frame, orient="horizontal", command=self.tree_input.xview)
         self.tree_input.configure(yscroll=scroll_y.set, xscroll=scroll_x.set)
@@ -209,16 +216,112 @@ class ModernAplikasiMachineLearning:
         self.log_area.pack(fill='both', padx=15, pady=15)
 
     def build_prediction_tab(self):
-        """Build the prediction tab with band selector and modern UI"""
+        """Build the prediction tab for new data"""
         # File input section
-        file_frame = ttk.LabelFrame(self.tab_prediksi, text=" Input Citra Multispektral ", style='Modern.TLabelframe')
+        file_frame = ttk.LabelFrame(self.tab_prediction, text=" Prediction Data Input ", style='Modern.TLabelframe')
+        file_frame.pack(fill='x', padx=20, pady=10)
+
+        file_input_frame = ttk.Frame(file_frame, style='Modern.TFrame')
+        file_input_frame.pack(fill='x', padx=15, pady=15)
+
+        entry_file = ttk.Entry(file_input_frame, textvariable=self.path_data_prediksi,
+                               style='Modern.TEntry', font=('SF Pro Text', 11))
+        entry_file.pack(side='left', fill='x', expand=True, padx=(0, 10))
+
+        btn_browse = ttk.Button(file_input_frame, text="📂 Browse",
+                                command=self.browse_data_prediksi, style='Secondary.TButton')
+        btn_browse.pack(side='left', padx=(0, 10))
+
+        btn_predict = ttk.Button(file_input_frame, text="🔮 Predict Nutrient Content",
+                                 command=self.start_prediction_thread, style='Accent.TButton')
+        btn_predict.pack(side='left')
+
+        # Results display
+        results_frame = ttk.LabelFrame(self.tab_prediction, text=" Prediction Results ", style='Modern.TLabelframe')
+        results_frame.pack(fill='both', expand=True, padx=20, pady=10)
+
+        # Best model info
+        best_model_frame = ttk.Frame(results_frame, style='Modern.TFrame')
+        best_model_frame.pack(fill='x', padx=15, pady=10)
+
+        self.prediction_info_label = self.create_modern_label(best_model_frame,
+                                                              "Load prediction data and trained model to see results",
+                                                              font_size=12, color='#8E8E93')
+        self.prediction_info_label.pack(anchor='w')
+
+        # Prediction results table
+        table_frame = ttk.Frame(results_frame, style='Modern.TFrame')
+        table_frame.pack(fill='both', expand=True, padx=15, pady=10)
+
+        self.tree_prediction = ttk.Treeview(table_frame, show='headings', style='Modern.Treeview')
+
+        scroll_y = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree_prediction.yview)
+        scroll_x = ttk.Scrollbar(table_frame, orient="horizontal", command=self.tree_prediction.xview)
+        self.tree_prediction.configure(yscroll=scroll_y.set, xscroll=scroll_x.set)
+
+        scroll_y.pack(side='right', fill='y')
+        scroll_x.pack(side='bottom', fill='x')
+        self.tree_prediction.pack(fill='both', expand=True)
+
+        # Accuracy metrics
+        metrics_frame = ttk.LabelFrame(self.tab_prediction, text=" Prediction Accuracy ", style='Modern.TLabelframe')
+        metrics_frame.pack(fill='x', padx=20, pady=10)
+
+        self.accuracy_text = scrolledtext.ScrolledText(metrics_frame, height=6,
+                                                       font=('SF Mono', 10),
+                                                       background='#ffffff',
+                                                       relief='flat',
+                                                       borderwidth=1)
+        self.accuracy_text.pack(fill='both', padx=15, pady=15)
+
+    def build_comparison_tab(self):
+        """Build the comparison tab"""
+        # Results display
+        results_frame = ttk.LabelFrame(self.tab_comparison, text=" Model & Index Comparison Results ",
+                                       style='Modern.TLabelframe')
+        results_frame.pack(fill='both', expand=True, padx=20, pady=10)
+
+        # Best model info
+        best_model_frame = ttk.Frame(results_frame, style='Modern.TFrame')
+        best_model_frame.pack(fill='x', padx=15, pady=10)
+
+        self.best_model_label = self.create_modern_label(best_model_frame,
+                                                         "Train models to see comparison results",
+                                                         font_size=14, bold=True, color='#8E8E93')
+        self.best_model_label.pack(anchor='w')
+
+        # Comparison table
+        table_frame = ttk.Frame(results_frame, style='Modern.TFrame')
+        table_frame.pack(fill='both', expand=True, padx=15, pady=10)
+
+        self.tree_comparison = ttk.Treeview(table_frame, show='headings', style='Modern.Treeview')
+
+        scroll_y = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree_comparison.yview)
+        scroll_x = ttk.Scrollbar(table_frame, orient="horizontal", command=self.tree_comparison.xview)
+        self.tree_comparison.configure(yscroll=scroll_y.set, xscroll=scroll_x.set)
+
+        scroll_y.pack(side='right', fill='y')
+        scroll_x.pack(side='bottom', fill='x')
+        self.tree_comparison.pack(fill='both', expand=True)
+
+        # Visualization frame
+        viz_frame = ttk.LabelFrame(self.tab_comparison, text=" Performance Visualizations ", style='Modern.TLabelframe')
+        viz_frame.pack(fill='both', expand=True, padx=20, pady=10)
+
+        self.viz_canvas_frame = ttk.Frame(viz_frame, style='Modern.TFrame')
+        self.viz_canvas_frame.pack(fill='both', expand=True, padx=15, pady=15)
+
+    def build_mapping_tab(self):
+        """Build the spatial mapping tab"""
+        # File input section
+        file_frame = ttk.LabelFrame(self.tab_mapping, text=" Multispectral Image Input ", style='Modern.TLabelframe')
         file_frame.pack(fill='x', padx=20, pady=10)
 
         # Single file option
         single_file_frame = ttk.Frame(file_frame, style='Modern.TFrame')
         single_file_frame.pack(fill='x', padx=15, pady=10)
 
-        self.create_modern_label(single_file_frame, "Single GeoTIFF (Semua Band):", 11, True).pack(anchor='w')
+        self.create_modern_label(single_file_frame, "Single GeoTIFF (All Bands):", 11, True).pack(anchor='w')
 
         single_input_frame = ttk.Frame(single_file_frame, style='Modern.TFrame')
         single_input_frame.pack(fill='x', pady=5)
@@ -230,100 +333,47 @@ class ModernAplikasiMachineLearning:
         ttk.Button(single_input_frame, text="📂 Browse",
                    command=self.browse_foto_udara, style='Secondary.TButton').pack(side='left')
 
-        # Multiple files option
-        multi_file_frame = ttk.Frame(file_frame, style='Modern.TFrame')
-        multi_file_frame.pack(fill='x', padx=15, pady=15)
+        # Band selector
+        band_frame = ttk.LabelFrame(self.tab_mapping, text=" Band Configuration ", style='Modern.TLabelframe')
+        band_frame.pack(fill='x', padx=20, pady=10)
 
-        self.create_modern_label(multi_file_frame, "Multiple Files (Band Terpisah):", 11, True).pack(anchor='w')
-
-        # Band selector grid
-        band_grid = ttk.Frame(multi_file_frame, style='Modern.TFrame')
-        band_grid.pack(fill='x', pady=10)
+        band_grid = ttk.Frame(band_frame, style='Modern.TFrame')
+        band_grid.pack(fill='x', padx=15, pady=10)
 
         bands = ['Blue', 'Green', 'Red', 'NIR', 'RedEdge']
         for i, band in enumerate(bands):
-            band_frame = ttk.Frame(band_grid, style='Modern.TFrame')
-            band_frame.grid(row=i // 3, column=i % 3, sticky='ew', padx=10, pady=5)
-            band_grid.columnconfigure(i % 3, weight=1)
+            band_row = ttk.Frame(band_grid, style='Modern.TFrame')
+            band_row.grid(row=i, column=0, sticky='ew', padx=10, pady=5)
+            band_grid.columnconfigure(0, weight=1)
 
-            self.create_modern_label(band_frame, f"{band}:", 10).pack(side='left')
+            self.create_modern_label(band_row, f"{band} Band:", 10).pack(side='left')
 
-            entry_band = ttk.Entry(band_frame, textvariable=self.band_files[band],
-                                   style='Modern.TEntry', font=('SF Pro Text', 10), width=20)
+            entry_band = ttk.Entry(band_row, textvariable=self.band_files[band],
+                                   style='Modern.TEntry', font=('SF Pro Text', 10))
             entry_band.pack(side='left', fill='x', expand=True, padx=(5, 5))
 
-            ttk.Button(band_frame, text="📁",
+            ttk.Button(band_row, text="📁",
                        command=lambda b=band: self.browse_band_file(b),
                        style='Secondary.TButton', width=3).pack(side='left')
 
-        # Color customization section
-        color_frame = ttk.LabelFrame(self.tab_prediksi, text=" Customization ", style='Modern.TLabelframe')
-        color_frame.pack(fill='x', padx=20, pady=10)
-
-        color_grid = ttk.Frame(color_frame, style='Modern.TFrame')
-        color_grid.pack(fill='x', padx=15, pady=10)
-
-        color_options = [
-            ('Scatter Points', 'scatter'),
-            ('Feature Importance', 'feature_importance'),
-            ('Actual Line', 'actual_line')
-        ]
-
-        for i, (label, key) in enumerate(color_options):
-            color_btn_frame = ttk.Frame(color_grid, style='Modern.TFrame')
-            color_btn_frame.grid(row=i // 2, column=i % 2, sticky='w', padx=10, pady=5)
-
-            self.create_modern_label(color_btn_frame, label, 10).pack(side='left')
-
-            color_btn = ttk.Button(color_btn_frame, text="🎨",
-                                   command=lambda k=key: self.choose_color(k),
-                                   style='Secondary.TButton', width=3)
-            color_btn.pack(side='left', padx=(5, 0))
-
-            # Color preview
-            color_preview = tk.Frame(color_btn_frame, background=self.plot_colors[key],
-                                     width=20, height=20, relief='solid', borderwidth=1)
-            color_preview.pack(side='left', padx=(5, 0))
-            setattr(self, f'{key}_preview', color_preview)
-
         # Action buttons
-        action_frame = ttk.Frame(self.tab_prediksi, style='Modern.TFrame')
+        action_frame = ttk.Frame(self.tab_mapping, style='Modern.TFrame')
         action_frame.pack(fill='x', padx=20, pady=10)
 
-        btn_predict = ttk.Button(action_frame, text="⚙️ Generate Potassium Map",
-                                 command=self.start_prediction_thread, style='Accent.TButton')
+        btn_predict = ttk.Button(action_frame, text="⚙️ Generate Spatial Nutrient Map",
+                                 command=self.start_mapping_thread, style='Accent.TButton')
         btn_predict.pack(pady=5)
 
         # Log area
-        log_frame = ttk.LabelFrame(self.tab_prediksi, text=" Prediction Log ", style='Modern.TLabelframe')
+        log_frame = ttk.LabelFrame(self.tab_mapping, text=" Mapping Log ", style='Modern.TLabelframe')
         log_frame.pack(fill='both', expand=True, padx=20, pady=10)
 
-        self.log_pred = scrolledtext.ScrolledText(log_frame, height=15,
-                                                  font=('SF Mono', 10),
-                                                  background='#ffffff',
-                                                  relief='flat',
-                                                  borderwidth=1)
-        self.log_pred.pack(fill='both', padx=15, pady=15)
-
-    def choose_color(self, color_key):
-        """Open color chooser dialog"""
-        color = colorchooser.askcolor(title=f"Choose {color_key} color",
-                                      initialcolor=self.plot_colors[color_key])[1]
-        if color:
-            self.plot_colors[color_key] = color
-            # Update preview
-            preview_widget = getattr(self, f'{color_key}_preview')
-            preview_widget.configure(background=color)
-
-    def browse_band_file(self, band_name):
-        """Browse for individual band files"""
-        filename = filedialog.askopenfilename(
-            title=f"Select {band_name} Band File",
-            filetypes=[("GeoTIFF", "*.tif *.tiff"), ("All files", "*.*")]
-        )
-        if filename:
-            self.band_files[band_name].set(filename)
-            self.log_p(f"{band_name} band: {os.path.basename(filename)}")
+        self.log_mapping = scrolledtext.ScrolledText(log_frame, height=15,
+                                                     font=('SF Mono', 10),
+                                                     background='#ffffff',
+                                                     relief='flat',
+                                                     borderwidth=1)
+        self.log_mapping.pack(fill='both', padx=15, pady=15)
 
     def browse_data_latih(self):
         """Browse for training data file"""
@@ -339,8 +389,27 @@ class ModernAplikasiMachineLearning:
                     self.df_data = pd.read_excel(filename)
 
                 self.load_table(self.tree_input, self.df_data)
-                self.log(f"✅ File loaded: {os.path.basename(filename)}")
+                self.log(f"✅ Training data loaded: {os.path.basename(filename)}")
                 self.log(f"📊 Data shape: {len(self.df_data)} rows, {len(self.df_data.columns)} columns")
+
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to read file: {e}")
+
+    def browse_data_prediksi(self):
+        """Browse for prediction data file"""
+        filename = filedialog.askopenfilename(
+            filetypes=[("CSV Files", "*.csv"), ("Excel Files", "*.xlsx"), ("All Files", "*.*")]
+        )
+        if filename:
+            self.path_data_prediksi.set(filename)
+            try:
+                if filename.endswith('.csv'):
+                    self.df_prediksi = pd.read_csv(filename)
+                else:
+                    self.df_prediksi = pd.read_excel(filename)
+
+                self.log_p(f"✅ Prediction data loaded: {os.path.basename(filename)}")
+                self.log_p(f"📊 Data shape: {len(self.df_prediksi)} rows, {len(self.df_prediksi.columns)} columns")
 
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to read file: {e}")
@@ -352,7 +421,17 @@ class ModernAplikasiMachineLearning:
         )
         if filename:
             self.path_foto_udara.set(filename)
-            self.log_p(f"📁 Image selected: {os.path.basename(filename)}")
+            self.log_m(f"📁 Image selected: {os.path.basename(filename)}")
+
+    def browse_band_file(self, band_name):
+        """Browse for individual band files"""
+        filename = filedialog.askopenfilename(
+            title=f"Select {band_name} Band File",
+            filetypes=[("GeoTIFF", "*.tif *.tiff"), ("All files", "*.*")]
+        )
+        if filename:
+            self.band_files[band_name].set(filename)
+            self.log_m(f"{band_name} band: {os.path.basename(filename)}")
 
     def load_table(self, tree, df):
         """Load data into treeview"""
@@ -363,7 +442,6 @@ class ModernAplikasiMachineLearning:
             tree.heading(col, text=col)
             tree.column(col, width=100, anchor="center")
 
-        # Show sample data for performance
         sample_df = df.head(100)
         for index, row in sample_df.iterrows():
             tree.insert("", "end", values=list(row))
@@ -376,8 +454,14 @@ class ModernAplikasiMachineLearning:
 
     def log_p(self, text):
         """Log to prediction area"""
-        self.log_pred.insert(tk.END, f"{text}\n")
-        self.log_pred.see(tk.END)
+        self.accuracy_text.insert(tk.END, f"{text}\n")
+        self.accuracy_text.see(tk.END)
+        self.root.update()
+
+    def log_m(self, text):
+        """Log to mapping area"""
+        self.log_mapping.insert(tk.END, f"{text}\n")
+        self.log_mapping.see(tk.END)
         self.root.update()
 
     def start_training_thread(self):
@@ -385,38 +469,37 @@ class ModernAplikasiMachineLearning:
         if self.df_data is None:
             messagebox.showwarning("Warning", "Please select training data file first!")
             return
-        threading.Thread(target=self.proses_training, daemon=True).start()
 
-    def proses_training(self):
-        """Training process"""
-        self.log("🎯 Starting training process...")
+        selected_models = [name for name, var in self.model_vars.items() if var.get()]
+        if not selected_models:
+            messagebox.showwarning("Warning", "Please select at least one model!")
+            return
+
+        threading.Thread(target=self.proses_training_comparison, daemon=True).start()
+
+    def proses_training_comparison(self):
+        """Comprehensive training and comparison"""
+        self.log("🎯 Starting comprehensive model training and comparison...")
 
         try:
             df = self.df_data.copy()
 
             # Find target column
-            target_col = 'Serapan_K'
-            if target_col not in df.columns:
-                possible_cols = [col for col in df.columns if 'K' in col or 'kalium' in col.lower()]
-                if possible_cols:
-                    target_col = possible_cols[0]
-                    self.log(f"⚠️ Using '{target_col}' as target column")
-                else:
-                    messagebox.showerror("Error",
-                                         f"Target column '{target_col}' not found! Available: {list(df.columns)}")
-                    return
-
-            # Prepare features and target
-            X = df.drop(columns=[target_col])
-            non_numeric_cols = X.select_dtypes(exclude=[np.number]).columns
-            if len(non_numeric_cols) > 0:
-                self.log(f"🗑️ Removing non-numeric columns: {list(non_numeric_cols)}")
-                X = X.select_dtypes(include=[np.number])
-
-            if X.empty:
-                messagebox.showerror("Error", "No numeric features available for training!")
+            target_col = self.find_target_column(df)
+            if not target_col:
                 return
 
+            # Find vegetation index columns
+            index_columns = self.find_vegetation_index_columns(df, target_col)
+            if not index_columns:
+                messagebox.showerror("Error", "No vegetation index columns found!")
+                return
+
+            self.log(f"🎯 Target column: {target_col}")
+            self.log(f"📊 Vegetation indices: {index_columns}")
+
+            # Prepare data
+            X = df[index_columns]
             y = df[target_col]
 
             # Handle missing values
@@ -425,225 +508,511 @@ class ModernAplikasiMachineLearning:
                 X = X.fillna(X.mean())
                 y = y.fillna(y.mean())
 
-            self.log(f"📈 Features: {list(X.columns)}")
-            self.log(f"🔢 Samples: {len(X)}")
-            self.log(f"🎯 Target: {target_col}")
-
             # Split data
             X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-            # Train model
-            self.log("🌲 Training Random Forest model...")
-            rf = RandomForestRegressor(n_estimators=100, random_state=42, max_depth=10, min_samples_split=5)
-            rf.fit(X_train, y_train)
+            # Compare models for each index
+            comparison_results = []
+            selected_models = [name for name, var in self.model_vars.items() if var.get()]
 
-            # Evaluate
-            y_pred = rf.predict(X_test)
-            r2 = r2_score(y_test, y_pred)
-            rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+            for index_name in index_columns:
+                self.log(f"🔍 Analyzing index: {index_name}")
 
-            self.log("✅ Training completed!")
-            self.log(f"📊 R² Score: {r2:.4f}")
-            self.log(f"📉 RMSE: {rmse:.4f}")
+                # Use only this index
+                X_train_idx = X_train[[index_name]]
+                X_test_idx = X_test[[index_name]]
 
-            # Save model
-            joblib.dump(rf, self.model_path)
-            self.model = rf
-            self.log(f"💾 Model saved as: {self.model_path}")
+                for model_name in selected_models:
+                    try:
+                        model = self.models[model_name]
+                        model.fit(X_train_idx, y_train)
 
-            # Show results
-            self.root.after(0, lambda: self.show_result_window(rf, X.columns, y_test, y_pred, r2, rmse))
+                        # Predict and evaluate
+                        y_pred = model.predict(X_test_idx)
+                        r2 = r2_score(y_test, y_pred)
+                        rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+                        mae = mean_absolute_error(y_test, y_pred)
+
+                        # Cross-validation
+                        cv_scores = cross_val_score(model, X_train_idx, y_train, cv=5, scoring='r2')
+                        cv_mean = cv_scores.mean()
+
+                        comparison_results.append({
+                            'Index': index_name,
+                            'Model': model_name,
+                            'R2': r2,
+                            'RMSE': rmse,
+                            'MAE': mae,
+                            'CV_Score': cv_mean,
+                            'Model_Object': model
+                        })
+
+                        self.log(f"   ✅ {model_name}: R²={r2:.4f}, RMSE={rmse:.4f}")
+
+                    except Exception as e:
+                        self.log(f"   ❌ {model_name} failed: {str(e)}")
+
+            # Find best combination
+            if comparison_results:
+                best_result = max(comparison_results, key=lambda x: x['R2'])
+                self.best_model = best_result['Model_Object']
+                self.best_index = best_result['Index']
+                self.comparison_results = comparison_results
+
+                self.log("✅ Training completed!")
+                self.log(f"🏆 Best combination: {best_result['Model']} with {best_result['Index']}")
+                self.log(f"📊 Best R²: {best_result['R2']:.4f}")
+
+                # Save best model
+                joblib.dump({
+                    'model': self.best_model,
+                    'index': self.best_index,
+                    'all_results': comparison_results
+                }, self.model_path)
+
+                # Update UI
+                self.root.after(0, self.update_comparison_results)
+
+            else:
+                messagebox.showerror("Error", "No successful model training!")
 
         except Exception as e:
             self.log(f"❌ Training error: {str(e)}")
             messagebox.showerror("Error", str(e))
 
-    def show_result_window(self, model, feature_names, y_test, y_pred, r2, rmse):
-        """Show results in modern window"""
+    def find_target_column(self, df):
+        """Find the target nutrient column"""
+        target_variations = ['serapan_k', 'serapan_kalium', 'kalium', 'k', 'nutrient', 'target', 'hara']
+
+        for col in df.columns:
+            col_str = str(col).lower()  # Konversi ke string dan lowercase
+            for variation in target_variations:
+                if variation in col_str:
+                    return col
+
+        # Jika tidak ditemukan, show column selection
+        return self.ask_target_column(df.columns)
+
+    def ask_target_column(self, columns):
+        """Ask user to select target column"""
         win = Toplevel(self.root)
-        win.title("📈 Analysis Results")
-        win.geometry("1400x800")
+        win.title("Select Target Column")
+        win.geometry("400x200")
         win.configure(bg='#f5f5f7')
 
-        # Center the window
-        win.update_idletasks()
-        x = (win.winfo_screenwidth() // 2) - (1400 // 2)
-        y = (win.winfo_screenheight() // 2) - (800 // 2)
-        win.geometry(f'1400x800+{x}+{y}')
+        ttk.Label(win, text="Please select the target nutrient column:",
+                  style='Modern.TLabel').pack(pady=20)
 
-        # Create modern tabs
-        tabs = ttk.Notebook(win, style='Modern.TNotebook')
+        selected_col = tk.StringVar()
+        col_combo = ttk.Combobox(win, textvariable=selected_col, values=list(columns))
+        col_combo.pack(pady=10)
+        col_combo.set(columns[0] if columns else "")
 
-        tab_metrics = ttk.Frame(tabs, style='Modern.TFrame')
-        tab_importance = ttk.Frame(tabs, style='Modern.TFrame')
-        tab_prediction = ttk.Frame(tabs, style='Modern.TFrame')
+        def confirm():
+            win.destroy()
 
-        tabs.add(tab_metrics, text='   📊 Summary & Charts  ')
-        tabs.add(tab_importance, text='   🌟 Feature Importance  ')
-        tabs.add(tab_prediction, text='   📋 Predictions  ')
-        tabs.pack(expand=True, fill="both", padx=20, pady=20)
+        ttk.Button(win, text="Confirm", command=confirm, style='Accent.TButton').pack(pady=20)
 
-        # Tab 1: Metrics & Charts
-        metrics_frame = ttk.Frame(tab_metrics, style='Modern.TFrame')
-        metrics_frame.pack(fill='both', expand=True, padx=20, pady=20)
+        win.transient(self.root)
+        win.grab_set()
+        self.root.wait_window(win)
 
-        # Results header
-        result_text = f"Model Accuracy (R²): {r2:.4f}\nPrediction Error (RMSE): {rmse:.4f}"
-        result_label = self.create_modern_label(metrics_frame, result_text, 16, True,
-                                                '#34C759' if r2 > 0.7 else '#FF9500')
-        result_label.pack(pady=20)
+        return selected_col.get()
 
-        # Modern plots
-        fig = Figure(figsize=(12, 5), facecolor='#f5f5f7')
+    def find_vegetation_index_columns(self, df, target_col):
+        """Find columns that are likely vegetation indices"""
+        index_patterns = ['ndvi', 'gndvi', 'ndre', 'savi', 'evi', 'osavi', 'msavi', 'gci', 'reci', 'ndwi', 'index']
 
-        # Plot 1: Scatter with custom colors
-        ax1 = fig.add_subplot(121)
-        ax1.scatter(y_test, y_pred, alpha=0.7, color=self.plot_colors['scatter'], s=60)
-        ax1.plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()],
-                 color=self.plot_colors['actual_line'], linewidth=2, linestyle='--')
-        ax1.set_xlabel("Actual K Absorption", fontsize=12, color='#333333')
-        ax1.set_ylabel("Predicted K Absorption", fontsize=12, color='#333333')
-        ax1.set_title("Actual vs Predicted", fontsize=14, color='#333333', pad=20)
-        ax1.grid(True, alpha=0.3, color=self.plot_colors['grid'])
-        ax1.set_facecolor('#ffffff')
+        index_columns = []
+        for col in df.columns:
+            col_str = str(col)  # Konversi ke string untuk menghindari masalah tipe data
 
-        # Plot 2: Feature importance with custom colors
-        ax2 = fig.add_subplot(122)
-        importances = model.feature_importances_
-        indices = np.argsort(importances)[::-1]
+            # Skip target column jika ada
+            if target_col and col_str.lower() == str(target_col).lower():
+                continue
 
-        features_sorted = [feature_names[i] for i in indices]
-        importances_sorted = importances[indices]
+            col_lower = col_str.lower()
+            for pattern in index_patterns:
+                if pattern in col_lower:
+                    index_columns.append(col_str)
+                    break
 
-        bars = ax2.barh(range(len(importances)), importances_sorted, align="center",
-                        color=self.plot_colors['feature_importance'], alpha=0.8)
-        ax2.set_yticks(range(len(importances)))
-        ax2.set_yticklabels(features_sorted, color='#333333')
-        ax2.set_xlabel("Feature Importance", fontsize=12, color='#333333')
-        ax2.set_title("Feature Importance Ranking", fontsize=14, color='#333333', pad=20)
-        ax2.grid(True, alpha=0.3, color=self.plot_colors['grid'])
-        ax2.set_facecolor('#ffffff')
+        # Jika tidak ditemukan, kembalikan semua kolom kecuali target
+        if not index_columns:
+            all_cols = [str(col) for col in df.columns]
+            if target_col:
+                target_str = str(target_col)
+                index_columns = [col for col in all_cols if col != target_str]
+            else:
+                index_columns = all_cols
 
-        # Add value labels on bars
-        for i, bar in enumerate(bars):
-            width = bar.get_width()
-            ax2.text(width + 0.01, bar.get_y() + bar.get_height() / 2,
-                     f'{width:.3f}', ha='left', va='center', fontsize=9, color='#333333')
+        return index_columns
+
+    def update_comparison_results(self):
+        """Update comparison tab with results"""
+        if not self.comparison_results:
+            return
+
+        # Update best model label
+        best_result = max(self.comparison_results, key=lambda x: x['R2'])
+        best_text = f"🏆 Best: {best_result['Model']} with {best_result['Index']} (R²: {best_result['R2']:.4f}, RMSE: {best_result['RMSE']:.4f})"
+        self.best_model_label.configure(text=best_text, foreground='#34C759')
+
+        # Update comparison table
+        self.update_comparison_table()
+
+        # Create visualizations
+        self.create_comparison_visualizations()
+
+    def update_comparison_table(self):
+        """Update comparison table"""
+        for item in self.tree_comparison.get_children():
+            self.tree_comparison.delete(item)
+
+        columns = ('Index', 'Model', 'R2', 'RMSE', 'MAE', 'CV_Score')
+        self.tree_comparison['columns'] = columns
+
+        for col in columns:
+            self.tree_comparison.heading(col, text=col)
+            self.tree_comparison.column(col, width=100, anchor='center')
+
+        # Sort by R2 score
+        sorted_results = sorted(self.comparison_results, key=lambda x: x['R2'], reverse=True)
+
+        for result in sorted_results:
+            values = (
+                result['Index'],
+                result['Model'],
+                f"{result['R2']:.4f}",
+                f"{result['RMSE']:.4f}",
+                f"{result['MAE']:.4f}",
+                f"{result['CV_Score']:.4f}"
+            )
+            self.tree_comparison.insert("", "end", values=values)
+
+    def create_comparison_visualizations(self):
+        """Create comparison visualizations"""
+        for widget in self.viz_canvas_frame.winfo_children():
+            widget.destroy()
+
+        fig = Figure(figsize=(12, 8), facecolor='#f5f5f7')
+
+        # 1. R2 Score comparison
+        ax1 = fig.add_subplot(221)
+        self.plot_model_comparison(ax1, 'R2', 'R² Score Comparison', 'R² Score')
+
+        # 2. RMSE comparison
+        ax2 = fig.add_subplot(222)
+        self.plot_model_comparison(ax2, 'RMSE', 'RMSE Comparison', 'RMSE', lower_better=True)
+
+        # 3. Performance heatmap
+        ax3 = fig.add_subplot(223)
+        self.plot_performance_heatmap(ax3)
+
+        # 4. Best model details
+        ax4 = fig.add_subplot(224)
+        self.plot_best_model_details(ax4)
 
         fig.tight_layout(pad=3.0)
-        canvas = FigureCanvasTkAgg(fig, master=metrics_frame)
+
+        canvas = FigureCanvasTkAgg(fig, master=self.viz_canvas_frame)
         canvas.draw()
         canvas.get_tk_widget().pack(fill='both', expand=True)
 
-        # Tab 2: Feature Importance Table
-        self.create_feature_importance_tab(tab_importance, model, feature_names)
+    def plot_model_comparison(self, ax, metric, title, ylabel, lower_better=False):
+        """Plot model comparison"""
+        df_plot = pd.DataFrame(self.comparison_results)
+        pivot_data = df_plot.pivot(index='Index', columns='Model', values=metric)
 
-        # Tab 3: Prediction Table
-        self.create_prediction_tab(tab_prediction, y_test, y_pred)
+        if lower_better:
+            pivot_data = pivot_data.reindex(pivot_data.mean().sort_values().index, axis=1)
+        else:
+            pivot_data = pivot_data.reindex(pivot_data.mean().sort_values(ascending=False).index, axis=1)
 
-    def create_feature_importance_tab(self, parent, model, feature_names):
-        """Create feature importance tab"""
-        frame = ttk.Frame(parent, style='Modern.TFrame')
-        frame.pack(fill='both', expand=True, padx=20, pady=20)
+        pivot_data.plot(kind='bar', ax=ax, colormap='Set3')
+        ax.set_title(title, fontsize=12, color='#333333')
+        ax.set_ylabel(ylabel, color='#333333')
+        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        ax.grid(True, alpha=0.3)
+        ax.set_facecolor('#ffffff')
 
-        tree = ttk.Treeview(frame, columns=("Rank", "Feature", "Importance"), show='headings', height=20)
-        tree.heading("Rank", text="Rank")
-        tree.heading("Feature", text="Feature Name")
-        tree.heading("Importance", text="Importance Score")
+    def plot_performance_heatmap(self, ax):
+        """Create performance heatmap"""
+        df_plot = pd.DataFrame(self.comparison_results)
+        heatmap_data = df_plot.pivot(index='Index', columns='Model', values='R2')
 
-        tree.column("Rank", width=80, anchor="center")
-        tree.column("Feature", width=300, anchor="w")
-        tree.column("Importance", width=150, anchor="center")
+        im = ax.imshow(heatmap_data, cmap='RdYlGn', aspect='auto')
+        ax.set_xticks(range(len(heatmap_data.columns)))
+        ax.set_yticks(range(len(heatmap_data.index)))
+        ax.set_xticklabels(heatmap_data.columns, rotation=45)
+        ax.set_yticklabels(heatmap_data.index)
+        ax.set_title('R² Score Heatmap', fontsize=12, color='#333333')
 
-        # Add scrollbar
-        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
-        tree.configure(yscrollcommand=scrollbar.set)
+        for i in range(len(heatmap_data.index)):
+            for j in range(len(heatmap_data.columns)):
+                text = ax.text(j, i, f'{heatmap_data.iloc[i, j]:.3f}',
+                               ha="center", va="center", color="black", fontsize=8)
 
-        tree.pack(side='left', fill='both', expand=True)
-        scrollbar.pack(side='right', fill='y')
+    def plot_best_model_details(self, ax):
+        """Plot best model details"""
+        best_result = max(self.comparison_results, key=lambda x: x['R2'])
 
-        # Populate data
-        df_imp = pd.DataFrame({'Feature': feature_names, 'Importance': model.feature_importances_})
-        df_imp = df_imp.sort_values('Importance', ascending=False)
+        metrics = ['R2', 'RMSE', 'MAE', 'CV_Score']
+        values = [best_result[metric] for metric in metrics]
+        labels = ['R²', 'RMSE', 'MAE', 'CV Score']
 
-        for i, (_, row) in enumerate(df_imp.iterrows(), 1):
-            tree.insert("", "end", values=(i, row['Feature'], f"{row['Importance']:.4f}"))
+        bars = ax.bar(labels, values, color=['#34C759', '#FF3B30', '#FF9500', '#007AFF'])
+        ax.set_title(f'Best: {best_result["Model"]} + {best_result["Index"]}',
+                     fontsize=12, color='#333333')
+        ax.set_ylabel('Score', color='#333333')
+        ax.grid(True, alpha=0.3)
+        ax.set_facecolor('#ffffff')
 
-    def create_prediction_tab(self, parent, y_test, y_pred):
-        """Create prediction results tab"""
-        frame = ttk.Frame(parent, style='Modern.TFrame')
-        frame.pack(fill='both', expand=True, padx=20, pady=20)
-
-        tree = ttk.Treeview(frame, columns=("Sample", "Actual", "Predicted", "Difference", "Error%"),
-                            show='headings', height=20)
-
-        columns = {
-            "Sample": ("Sample #", 80),
-            "Actual": ("Actual Value", 120),
-            "Predicted": ("Predicted Value", 120),
-            "Difference": ("Difference", 100),
-            "Error%": ("Error %", 100)
-        }
-
-        for col, (text, width) in columns.items():
-            tree.heading(col, text=text)
-            tree.column(col, width=width, anchor="center")
-
-        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
-        tree.configure(yscrollcommand=scrollbar.set)
-
-        tree.pack(side='left', fill='both', expand=True)
-        scrollbar.pack(side='right', fill='y')
-
-        # Populate data
-        y_test_arr = np.array(y_test)
-        for i in range(len(y_test)):
-            act = y_test_arr[i]
-            pred_val = y_pred[i]
-            diff = abs(act - pred_val)
-            error_pct = (diff / act) * 100 if act != 0 else 0
-
-            tree.insert("", "end", values=(
-                i + 1,
-                f"{act:.2f}",
-                f"{pred_val:.2f}",
-                f"{diff:.2f}",
-                f"{error_pct:.1f}%"
-            ))
+        for bar, value in zip(bars, values):
+            height = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width() / 2., height,
+                    f'{value:.4f}', ha='center', va='bottom')
 
     def start_prediction_thread(self):
-        """Start prediction in separate thread"""
+        """Start prediction thread"""
         if not os.path.exists(self.model_path):
-            messagebox.showwarning("Warning", "Model not trained! Please train model first.")
+            messagebox.showwarning("Warning", "No trained model found! Please train models first.")
             return
-        threading.Thread(target=self.proses_prediksi, daemon=True).start()
 
-    def proses_prediksi(self):
-        """Prediction process with band selection support"""
-        # Check input method
+        if self.df_prediksi is None:
+            messagebox.showwarning("Warning", "Please select prediction data file first!")
+            return
+
+        threading.Thread(target=self.proses_prediksi_data, daemon=True).start()
+
+    def proses_prediksi_data(self):
+        """Process data prediction"""
+        try:
+            self.log_p("🎯 Starting nutrient content prediction...")
+
+            # Load model
+            model_data = joblib.load(self.model_path)
+            best_model = model_data['model']
+            best_index = model_data['index']
+            all_results = model_data['all_results']
+
+            self.log_p(f"📊 Using best model: {type(best_model).__name__}")
+            self.log_p(f"🌿 Best index: {best_index}")
+
+            # Validasi dan konversi best_index ke string jika perlu
+            if hasattr(best_index, 'item'):
+                best_index = best_index.item() if hasattr(best_index, 'item') else str(best_index)
+            best_index = str(best_index)
+
+            self.log_p(f"🔧 Best index (processed): {best_index}")
+
+            # Find target column in prediction data
+            target_col = self.find_target_column(self.df_prediksi)
+            if not target_col:
+                self.log_p("⚠️ No target column found. Only predictions will be generated.")
+                has_target = False
+            else:
+                has_target = True
+                self.log_p(f"🎯 Target column found: {target_col}")
+
+            # Find vegetation index columns - PERBAIKAN DI SINI
+            index_columns = self.find_vegetation_index_columns(self.df_prediksi, target_col if has_target else "")
+
+            # Debug: Tampilkan kolom yang tersedia
+            self.log_p(f"📋 Available columns: {list(self.df_prediksi.columns)}")
+            self.log_p(f"🌿 Found index columns: {index_columns}")
+
+            # Validasi best_index ada dalam data prediksi
+            if best_index not in self.df_prediksi.columns:
+                self.log_p(f"⚠️ Warning: Best index '{best_index}' not found in prediction data!")
+                self.log_p("🔍 Looking for similar columns...")
+
+                # Cari kolom yang mirip
+                similar_cols = [col for col in self.df_prediksi.columns if best_index.lower() in col.lower()]
+                if similar_cols:
+                    self.log_p(f"💡 Similar columns found: {similar_cols}")
+                    best_index = similar_cols[0]  # Gunakan kolom pertama yang mirip
+                    self.log_p(f"🔄 Using similar column: {best_index}")
+                else:
+                    # Jika tidak ada yang mirip, gunakan kolom pertama yang tersedia
+                    available_cols = [col for col in index_columns if col in self.df_prediksi.columns]
+                    if available_cols:
+                        best_index = available_cols[0]
+                        self.log_p(f"🔄 Using available column: {best_index}")
+                    else:
+                        messagebox.showerror("Error",
+                                             f"Best index '{best_index}' not found in prediction data and no suitable alternatives!")
+                        return
+
+            # Prepare prediction data - PASTIKAN best_index adalah string
+            try:
+                X_pred = self.df_prediksi[[best_index]]
+                self.log_p(f"✅ Using index column: {best_index}")
+            except KeyError as e:
+                self.log_p(f"❌ KeyError: {e}")
+                self.log_p(f"📊 Available columns: {list(self.df_prediksi.columns)}")
+                messagebox.showerror("Error", f"Column '{best_index}' not found in data!")
+                return
+
+            # Handle missing values
+            if X_pred.isnull().any().any():
+                X_pred = X_pred.fillna(X_pred.mean())
+                self.log_p("🔧 Handled missing values")
+
+            # Pastikan data tidak kosong
+            if X_pred.empty:
+                messagebox.showerror("Error", "Prediction data is empty after preprocessing!")
+                return
+
+            # Make predictions
+            predictions = best_model.predict(X_pred)
+
+            # Prepare results
+            results_df = self.df_prediksi.copy()
+            results_df['Predicted_Nutrient'] = predictions
+
+            if has_target:
+                actual_values = self.df_prediksi[target_col]
+
+                # Calculate accuracy metrics
+                r2 = r2_score(actual_values, predictions)
+                rmse = np.sqrt(mean_squared_error(actual_values, predictions))
+                mae = mean_absolute_error(actual_values, predictions)
+
+                # Compare all indices if target available
+                index_accuracies = []
+                for index_name in index_columns:
+                    if index_name in self.df_prediksi.columns:
+                        X_idx = self.df_prediksi[[index_name]].fillna(self.df_prediksi[[index_name]].mean())
+
+                        # Find the best model for this index from training results
+                        index_results = [r for r in all_results if str(r['Index']) == str(index_name)]
+                        if index_results:
+                            best_index_model = max(index_results, key=lambda x: x['R2'])['Model_Object']
+                            try:
+                                pred_idx = best_index_model.predict(X_idx)
+                                r2_idx = r2_score(actual_values, pred_idx)
+                                index_accuracies.append({
+                                    'Index': index_name,
+                                    'R2': r2_idx,
+                                    'Model': type(best_index_model).__name__
+                                })
+                            except Exception as e:
+                                self.log_p(f"⚠️ Prediction failed for {index_name}: {e}")
+
+                # Sort by accuracy
+                index_accuracies.sort(key=lambda x: x['R2'], reverse=True)
+
+                # Display accuracy results
+                self.log_p("\n📊 PREDICTION ACCURACY RESULTS:")
+                self.log_p("=" * 50)
+                self.log_p(f"Overall Accuracy with Best Index ({best_index}):")
+                self.log_p(f"  R² Score: {r2:.4f}")
+                self.log_p(f"  RMSE: {rmse:.4f}")
+                self.log_p(f"  MAE: {mae:.4f}")
+
+                self.log_p("\n🌿 INDEX ACCURACY COMPARISON:")
+                for i, acc in enumerate(index_accuracies, 1):
+                    status = "🏆 BEST" if i == 1 else "✓" if acc['R2'] > 0.5 else "⚠️"
+                    self.log_p(f"  {i:2d}. {acc['Index']:8} - R²: {acc['R2']:.4f} {status}")
+
+            # Update prediction table
+            self.root.after(0, lambda: self.update_prediction_results(results_df, has_target))
+
+            self.log_p("✅ Prediction completed successfully!")
+
+        except Exception as e:
+            self.log_p(f"❌ Prediction error: {str(e)}")
+            import traceback
+            self.log_p(f"🔍 Detailed error: {traceback.format_exc()}")
+            messagebox.showerror("Error", f"Prediction failed: {str(e)}")
+
+    def update_prediction_results(self, results_df, has_target):
+        """Update prediction results table"""
+        try:
+            for item in self.tree_prediction.get_children():
+                self.tree_prediction.delete(item)
+
+            # Determine columns to show
+            columns = list(results_df.columns)
+
+            # Tambahkan kolom Error jika ada target
+            if has_target:
+                target_col = self.find_target_column(results_df)
+                if target_col and 'Predicted_Nutrient' in results_df.columns:
+                    # Hitung error untuk setiap row
+                    errors = abs(results_df[target_col] - results_df['Predicted_Nutrient'])
+                    results_df['Error'] = errors
+                    columns = list(results_df.columns)
+
+            self.tree_prediction['columns'] = columns
+
+            for col in columns:
+                col_str = str(col)  # Pastikan string
+                self.tree_prediction.heading(col_str, text=col_str)
+                self.tree_prediction.column(col_str, width=100, anchor='center')
+
+            # Populate table
+            for index, row in results_df.iterrows():
+                values = []
+                for col in columns:
+                    val = row[col]
+                    if isinstance(val, (int, float)):
+                        values.append(f"{val:.4f}")
+                    else:
+                        values.append(str(val))
+
+                self.tree_prediction.insert("", "end", values=values)
+
+            # Update info label
+            if has_target:
+                self.prediction_info_label.configure(
+                    text="✅ Prediction completed with accuracy assessment",
+                    foreground='#34C759'
+                )
+            else:
+                self.prediction_info_label.configure(
+                    text="✅ Prediction completed (no target for accuracy assessment)",
+                    foreground='#FF9500'
+                )
+
+        except Exception as e:
+            self.log_p(f"❌ Error updating prediction results: {str(e)}")
+
+    def start_mapping_thread(self):
+        """Start mapping thread"""
+        if not os.path.exists(self.model_path):
+            messagebox.showwarning("Warning", "No trained model found! Please train models first.")
+            return
+
+        threading.Thread(target=self.proses_pemetaan, daemon=True).start()
+
+    def proses_pemetaan(self):
+        """Process spatial mapping"""
         single_file = self.path_foto_udara.get()
         band_files_provided = any(var.get() for var in self.band_files.values())
 
         if not single_file and not band_files_provided:
-            messagebox.showerror("Error", "Please select either a multispectral file or individual band files!")
-            return
-
-        if not os.path.exists(self.model_path):
-            messagebox.showerror("Error", f"Model {self.model_path} not found!")
+            messagebox.showerror("Error", "Please select either multispectral file or individual band files!")
             return
 
         try:
-            self.log_p("🎯 Starting potassium map generation...")
-            self.log_p("📥 Loading model...")
+            self.log_m("🎯 Starting spatial nutrient mapping...")
 
-            model = joblib.load(self.model_path)
+            # Load model
+            model_data = joblib.load(self.model_path)
+            model = model_data['model']
+            best_index = model_data['index']
 
-            # Read bands based on input method
+            self.log_m(f"📊 Using model: {type(model).__name__}")
+            self.log_m(f"🌿 Best index: {best_index}")
+
+            # Read bands
             if single_file:
-                self.log_p("🖼️ Reading multispectral file...")
+                self.log_m("🖼️ Reading multispectral file...")
                 bands_data = self.read_single_file(single_file)
             else:
-                self.log_p("🖼️ Reading individual band files...")
+                self.log_m("🖼️ Reading individual band files...")
                 bands_data = self.read_band_files()
 
             if bands_data is None:
@@ -652,64 +1021,61 @@ class ModernAplikasiMachineLearning:
             blue, green, red, nir, re = bands_data
 
             # Calculate vegetation indices
-            self.log_p("📊 Calculating vegetation indices...")
-            indices = self.calculate_vegetation_indices(blue, green, red, nir, re)
+            self.log_m("📊 Calculating vegetation indices...")
+            index_maps = {}
+            for index_name, index_func in self.vegetation_indices.items():
+                index_map = index_func(blue, green, red, nir, re)
+                index_maps[index_name] = index_map
 
-            # Prepare prediction data
-            self.log_p("🔄 Preparing prediction data...")
-            X_pred = self.prepare_prediction_data(indices)
+            # Predict using best index
+            if best_index in index_maps:
+                self.log_m(f"🔮 Predicting using best index: {best_index}")
+                pred_map = self.predict_with_model(model, index_maps[best_index])
 
-            # Perform prediction
-            self.log_p("🔮 Predicting potassium absorption...")
-            pred_map = self.predict_potassium(model, X_pred, blue.shape)
+                # Save results
+                output_path = self.save_prediction_map(pred_map,
+                                                       single_file if single_file else list(self.band_files.values())[
+                                                           0].get(),
+                                                       best_index)
 
-            # Save results
-            self.log_p("💾 Saving results...")
-            output_path = self.save_prediction_map(pred_map,
-                                                   single_file if single_file else list(self.band_files.values())[
-                                                       0].get())
+                # Show preview
+                self.root.after(0, lambda: self.tampilkan_preview_peta(output_path, index_maps, best_index))
 
-            # Show preview
-            self.root.after(0, lambda: self.tampilkan_preview_peta(output_path))
+                self.log_m("✅ Spatial mapping completed successfully!")
 
-            messagebox.showinfo("Success",
-                                f"Potassium map successfully generated!\n\n"
-                                f"File: {os.path.basename(output_path)}\n"
-                                f"Size: {pred_map.shape[1]} x {pred_map.shape[0]} pixels")
+            else:
+                messagebox.showerror("Error", f"Best index {best_index} not available!")
 
         except Exception as e:
-            self.log_p(f"❌ Prediction error: {str(e)}")
+            self.log_m(f"❌ Mapping error: {str(e)}")
             messagebox.showerror("Error", str(e))
 
     def read_single_file(self, file_path):
-        """Read all bands from single multispectral file"""
+        """Read single multispectral file"""
         try:
             with rasterio.open(file_path) as src:
-                profile = src.profile
-                self.log_p(f"📐 Image profile: {src.width} x {src.height} pixels, {src.count} bands")
+                self.log_m(f"📐 Image: {src.width} x {src.height} pixels, {src.count} bands")
 
-                # Read bands with fallbacks
                 bands = []
-                for i in range(1, 6):  # Try to read bands 1-5
+                for i in range(1, 6):
                     try:
                         band_data = src.read(i).astype('float32')
                         bands.append(band_data)
-                        self.log_p(f"📷 Band {i} loaded successfully")
                     except:
-                        if i == 5:  # Red Edge
-                            self.log_p("⚠️ Red Edge band not available, using NIR as substitute")
-                            bands.append(bands[3].copy())  # Use NIR as substitute
+                        if i == 5:
+                            self.log_m("⚠️ Using NIR as RedEdge substitute")
+                            bands.append(bands[3].copy())
                         else:
                             raise Exception(f"Failed to read band {i}")
 
                 return bands
 
         except Exception as e:
-            self.log_p(f"❌ Error reading file: {e}")
+            self.log_m(f"❌ Error reading file: {e}")
             return None
 
     def read_band_files(self):
-        """Read bands from individual files"""
+        """Read individual band files"""
         bands_data = []
         band_order = ['Blue', 'Green', 'Red', 'NIR', 'RedEdge']
 
@@ -717,8 +1083,8 @@ class ModernAplikasiMachineLearning:
             file_path = self.band_files[band_name].get()
             if not file_path:
                 if band_name == 'RedEdge':
-                    self.log_p("⚠️ Red Edge not provided, using NIR as substitute")
-                    bands_data.append(bands_data[3].copy())  # Use NIR as substitute for RedEdge
+                    self.log_m("⚠️ Using NIR as RedEdge substitute")
+                    bands_data.append(bands_data[3].copy())
                 else:
                     messagebox.showerror("Error", f"Missing {band_name} band file!")
                     return None
@@ -727,74 +1093,36 @@ class ModernAplikasiMachineLearning:
                     with rasterio.open(file_path) as src:
                         band_data = src.read(1).astype('float32')
                         bands_data.append(band_data)
-                        self.log_p(f"📷 {band_name} band loaded: {os.path.basename(file_path)}")
                 except Exception as e:
-                    self.log_p(f"❌ Error reading {band_name} band: {e}")
+                    self.log_m(f"❌ Error reading {band_name} band: {e}")
                     return None
 
         return bands_data
 
-    def calculate_vegetation_indices(self, blue, green, red, nir, re):
-        """Calculate various vegetation indices"""
-        with np.errstate(divide='ignore', invalid='ignore'):
-            ndvi = np.where((nir + red) != 0, (nir - red) / (nir + red), 0)
-            ndre = np.where((nir + re) != 0, (nir - re) / (nir + re), 0)
-            gndvi = np.where((nir + green) != 0, (nir - green) / (nir + green), 0)
-            savi = np.where((nir + red + 0.5) != 0, (1.5 * (nir - red)) / (nir + red + 0.5), 0)
-            evi = np.where((nir + 6 * red - 7.5 * blue + 1) != 0,
-                           2.5 * (nir - red) / (nir + 6 * red - 7.5 * blue + 1), 0)
+    def predict_with_model(self, model, index_map):
+        """Predict with model"""
+        flat_data = index_map.flatten().reshape(-1, 1)
+        flat_data = np.nan_to_num(flat_data, nan=0, posinf=0, neginf=0)
 
-        self.log_p("✅ Vegetation indices calculated: NDVI, NDRE, GNDVI, SAVI, EVI")
-        return ndvi, ndre, gndvi, savi, evi
+        predictions = model.predict(flat_data)
+        pred_map = predictions.reshape(index_map.shape)
 
-    def prepare_prediction_data(self, indices):
-        """Prepare data for prediction"""
-        ndvi, ndre, gndvi, savi, evi = indices
-
-        # Stack all indices
-        features_list = [index.flatten() for index in indices]
-        X_pred = np.column_stack(features_list)
-
-        # Clean data
-        X_pred = np.nan_to_num(X_pred, nan=0, posinf=0, neginf=0)
-
-        self.log_p(f"📊 Prediction data: {X_pred.shape[0]} pixels, {X_pred.shape[1]} features")
-        return X_pred
-
-    def predict_potassium(self, model, X_pred, original_shape):
-        """Perform potassium prediction"""
-        batch_size = 100000
-        predictions = np.zeros(X_pred.shape[0])
-
-        for i in range(0, X_pred.shape[0], batch_size):
-            end_idx = min(i + batch_size, X_pred.shape[0])
-            batch = X_pred[i:end_idx]
-
-            valid_mask = np.any(batch != 0, axis=1)
-            if np.any(valid_mask):
-                predictions[i:end_idx][valid_mask] = model.predict(batch[valid_mask])
-
-            if i % 500000 == 0:
-                self.log_p(f"📈 Processed: {end_idx}/{X_pred.shape[0]} pixels")
-
-        # Reshape and normalize
-        pred_map = predictions.reshape(original_shape)
+        # Normalize
         pred_min, pred_max = np.min(pred_map), np.max(pred_map)
-
         if pred_max > pred_min:
             pred_map_normalized = (pred_map - pred_min) / (pred_max - pred_min) * 100
         else:
             pred_map_normalized = pred_map
 
-        self.log_p(f"📊 Prediction range: {pred_min:.2f} - {pred_max:.2f}")
+        self.log_m(f"📊 Prediction range: {pred_min:.2f} - {pred_max:.2f}")
         return pred_map_normalized
 
-    def save_prediction_map(self, pred_map, input_path):
-        """Save prediction map to file"""
+    def save_prediction_map(self, pred_map, input_path, index_name):
+        """Save prediction map"""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         base_name = os.path.splitext(input_path)[0]
-        out_path = f"{base_name}_POTASSIUM_MAP.tif"
+        out_path = f"{base_name}_NUTRIENT_MAP_{timestamp}.tif"
 
-        # Create simple profile for output
         profile = {
             'driver': 'GTiff',
             'dtype': rasterio.float32,
@@ -805,55 +1133,45 @@ class ModernAplikasiMachineLearning:
         with rasterio.open(out_path, 'w', **profile) as dst:
             dst.write(pred_map.astype(rasterio.float32), 1)
             dst.update_tags(
-                Title="Potassium Absorption Map",
-                Model="Random Forest",
-                Features="NDVI, NDRE, GNDVI, SAVI, EVI",
+                Title=f"Nutrient Map - {index_name}",
+                Model=type(self.best_model).__name__,
+                Index=index_name,
                 Units="Relative Index (0-100)"
             )
 
-        self.log_p(f"✅ Map saved: {out_path}")
-        self.log_p(f"📈 Statistics - Min: {np.min(pred_map):.2f}, "
-                   f"Max: {np.max(pred_map):.2f}, Mean: {np.mean(pred_map):.2f}")
-
+        self.log_m(f"💾 Map saved: {out_path}")
         return out_path
 
-    def tampilkan_preview_peta(self, tif_path):
+    def tampilkan_preview_peta(self, tif_path, index_maps, best_index):
         """Show map preview"""
         try:
             with rasterio.open(tif_path) as src:
                 data = src.read(1)
 
                 preview_win = Toplevel(self.root)
-                preview_win.title("🗺️ Potassium Map Preview")
-                preview_win.geometry("900x700")
+                preview_win.title("🗺️ Nutrient Map Preview")
+                preview_win.geometry("1000x700")
                 preview_win.configure(bg='#f5f5f7')
 
                 # Center window
                 preview_win.update_idletasks()
-                x = (preview_win.winfo_screenwidth() // 2) - (900 // 2)
+                x = (preview_win.winfo_screenwidth() // 2) - (1000 // 2)
                 y = (preview_win.winfo_screenheight() // 2) - (700 // 2)
-                preview_win.geometry(f'900x700+{x}+{y}')
+                preview_win.geometry(f'1000x700+{x}+{y}')
 
-                # Create modern plot
                 fig = Figure(figsize=(10, 8), facecolor='#f5f5f7')
                 ax = fig.add_subplot(111)
 
-                # Use custom colormap
-                cmap = LinearSegmentedColormap.from_list('custom_yellow_green',
-                                                         ['#FFD600', '#34C759', '#007AFF'])
+                cmap = LinearSegmentedColormap.from_list('custom_nutrient',
+                                                         ['#FF6B6B', '#FFD93D', '#6BCF7F', '#4D96FF'])
                 im = ax.imshow(data, cmap=cmap, vmin=0, vmax=100)
-                ax.set_title("Potassium Absorption Map\n(Relative Index 0-100)",
+                ax.set_title(f"Nutrient Absorption Map\nBest Index: {best_index}",
                              fontsize=14, color='#333333', pad=20)
-                ax.set_xlabel("Pixel X", color='#333333')
-                ax.set_ylabel("Pixel Y", color='#333333')
                 ax.set_facecolor('#ffffff')
 
-                # Colorbar
                 cbar = fig.colorbar(im, ax=ax, shrink=0.8)
-                cbar.set_label("Potassium Level\n(Relative Value)",
-                               color='#333333', fontsize=10)
+                cbar.set_label("Nutrient Level", color='#333333')
 
-                # Statistics
                 stats_text = f"""Statistics:
 Min: {np.nanmin(data):.2f}
 Max: {np.nanmax(data):.2f}
@@ -862,8 +1180,7 @@ Std: {np.nanstd(data):.2f}"""
 
                 ax.text(0.02, 0.98, stats_text, transform=ax.transAxes,
                         verticalalignment='top',
-                        bbox=dict(boxstyle='round', facecolor='#ffffff', alpha=0.9,
-                                  edgecolor='#E5E5EA'),
+                        bbox=dict(boxstyle='round', facecolor='#ffffff', alpha=0.9),
                         fontsize=10, color='#333333')
 
                 canvas = FigureCanvasTkAgg(fig, master=preview_win)
@@ -871,10 +1188,10 @@ Std: {np.nanstd(data):.2f}"""
                 canvas.get_tk_widget().pack(fill="both", expand=True, padx=20, pady=20)
 
         except Exception as e:
-            self.log_p(f"❌ Preview error: {e}")
+            self.log_m(f"❌ Preview error: {e}")
 
 
 if __name__ == "__main__":
     root = tk.Tk()
-    app = ModernAplikasiMachineLearning(root)
+    app = ComprehensiveAgriAnalytics(root)
     root.mainloop()
